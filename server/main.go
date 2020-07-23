@@ -21,6 +21,7 @@ type Client struct {
 	id     string          // 使用者id
 	socket *websocket.Conn // 連線的socket
 	send   chan []byte     // 傳送的訊息
+	room   string          // 客戶端的房間
 }
 
 // message格式化成json
@@ -28,6 +29,7 @@ type Message struct {
 	Sender    string `json:"sender,omitempty"`    // 傳送者
 	Recipient string `json:"recipient,omitempty"` // 接收者
 	Content   string `json:"content,omitempty"`   // 內容
+	Room      string `json:"room,omitempty"`
 }
 
 // 建立客戶端管理者
@@ -57,13 +59,17 @@ func (manager *ClientManager) start() {
 			}
 		// 廣播
 		case message := <- manager.broadcast:
+			var msg Message
+			json.Unmarshal(message, &msg)
 			//遍歷已經連線的客戶端，把訊息傳送給他們
 			for conn := range manager.clients {
-				select {
-				case conn.send <- message:
-				default:
-					close(conn.send)
-					delete(manager.clients, conn)
+				if conn.room == msg.Room {
+					select {
+					case conn.send <- message:
+					default:
+						close(conn.send)
+						delete(manager.clients, conn)
+					}
 				}
 			}
 		}
@@ -97,7 +103,7 @@ func (c *Client) read() {
 			break
 		}
 		//如果沒有錯誤資訊就把資訊放入broadcast
-		jsonMessage, _ := json.Marshal(&Message{Sender: c.id, Content: string(message)})
+		jsonMessage, _ := json.Marshal(&Message{Sender: c.id, Content: string(message), Room: c.room})
 		manager.broadcast <- jsonMessage
 	}
 }
@@ -139,10 +145,17 @@ func wsPage(res http.ResponseWriter, req *http.Request) {
 	//每一次連線都會新開一個client，client.id通過uuid生成保證每次都是不同的
 	u, _ :=  uuid.NewV4()
 	id := u.String()
+	room := ""
+	if len(manager.clients) < 2 {
+		room = "testroom"
+	} else {
+		room = "test2room"
+	}
 	client := &Client{
 		id: id,
 		socket: conn, 
 		send: make(chan []byte),
+		room: room,
 	}
 	//註冊一個新的連結
 	manager.register <- client
